@@ -1,7 +1,7 @@
 # 📊 Grid Investment Prioritization Engine
 
-**Benefit-Cost Optimization for Utility Infrastructure Capital Decisions**  
-Built by [Sherriff Abdul-Hamid](https://poverty360.org) | Portfolio project for SCE Senior Data Science Manager
+**Benefit-cost optimization and capital portfolio planning for utility infrastructure investment**  
+Built by Sherriff Abdul-Hamid | poverty360.org
 
 ---
 
@@ -82,16 +82,16 @@ producing P10–P90 confidence intervals and probability of positive BCR.
 
 ---
 
-## Connection to SCE Priorities
+## Applications in Utility Infrastructure
 
-| CPUC / SCE Requirement | This Tool |
-|------------------------|-----------|
-| Risk-Based Decision-Making (RBDM) | Expected value framework + BCR ranking |
-| Wildfire Mitigation Plan filings | Wildfire category with regulatory flag |
-| Benefit-cost analyses for investment decisions | Full BCA register with NPV, BCR |
-| Capital budget optimization | Greedy knapsack with budget constraint |
-| Uncertainty and sensitivity analysis | Monte Carlo + discount rate sensitivity |
-| Executive stakeholder communication | Scenario comparison with narrative insight |
+| Use Case | How This Tool Addresses It |
+|----------|---------------------------|
+| Capital budget allocation | Greedy knapsack optimizer maximises risk reduction per dollar spent |
+| Regulatory benefit-cost filings | Full BCR and NPV register aligned to CPUC RBDM framework |
+| Portfolio scenario comparison | Three-scenario builder quantifies tradeoffs between investment strategies |
+| Investment uncertainty management | Monte Carlo simulation produces P10-P90 confidence intervals on returns |
+| Efficient frontier analysis | Identifies optimal portfolios at every budget level |
+| Stakeholder communication | Automated narrative insight box explains scenario tradeoffs in plain language |
 
 ---
 

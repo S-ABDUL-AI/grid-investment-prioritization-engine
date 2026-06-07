@@ -8,33 +8,40 @@ infrastructure investment decisions — bridging development economics
 methodology with utility asset management.
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-from scipy.optimize import linprog
-import plotly.express as px
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 import html
+import warnings
 from datetime import date
 from io import BytesIO
-import warnings
-warnings.filterwarnings("ignore")
 
-# ── DESIGN TOKENS ─────────────────────────────────────────────────────────────
-NAVY      = "#0A1F44"
-NAVY_MID  = "#152B5C"
-GOLD      = "#C9A84C"
-GOLD_LT   = "#E8C97A"
-INK       = "#1A1A1A"
-BODY      = "#2C3E50"
-MUTED     = "#6B7280"
-RED       = "#C8382A"
-AMBER     = "#B8560A"
-GREEN     = "#1A7A2E"
-TEAL      = "#0E7490"
-RULE      = "#E2E6EC"
-OFF_WHITE = "#F8F6F1"
+import numpy as np
+import pandas as pd
+import plotly.express as px
+import plotly.graph_objects as go
+import streamlit as st
+from plotly.subplots import make_subplots
+
+from model import (
+    AMBER,
+    BODY,
+    CAT_COLORS,
+    CATEGORIES,
+    GOLD,
+    MUTED,
+    NAVY,
+    NAVY_MID,
+    OBJ_MAP,
+    OFF_WHITE,
+    RED,
+    REGIONS,
+    RULE,
+    build_scenarios,
+    generate_projects,
+    greedy_optimize,
+    run_monte_carlo,
+    scenario_summary_rows,
+)
+
+warnings.filterwarnings("ignore")
 
 # ── PAGE CONFIG ───────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -82,7 +89,7 @@ st.markdown(f"""
   .kpi-value {{ font-size: 1.85rem; font-weight: 700; color: {NAVY}; margin: 0; line-height: 1.1; }}
   .kpi-label {{ font-size: 10px; font-weight: 700; color: {MUTED}; margin: 6px 0 0;
                 text-transform: uppercase; letter-spacing: 1px; }}
-  .kpi-green {{ border-top-color: {GREEN}; }}
+  .kpi-green {{ border-top-color: #1A7A2E; }}
   .kpi-amber {{ border-top-color: {AMBER}; }}
   .kpi-red   {{ border-top-color: {RED}; }}
   .section-header {{
@@ -124,234 +131,18 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 
-# ── DATA GENERATION ───────────────────────────────────────────────────────────
 @st.cache_data
-def generate_projects(seed=42):
-    rng = np.random.default_rng(seed)
-
-    categories = {
-        "Wildfire Mitigation":    {"n": 22, "cost_range": (0.8e6,  18e6),  "base_bcr": 3.8},
-        "Grid Hardening":         {"n": 18, "cost_range": (1.5e6,  25e6),  "base_bcr": 2.9},
-        "Predictive Maintenance": {"n": 16, "cost_range": (0.3e6,  6e6),   "base_bcr": 4.2},
-        "Undergrounding":         {"n": 12, "cost_range": (5e6,    60e6),  "base_bcr": 1.8},
-        "Substation Upgrades":    {"n": 10, "cost_range": (3e6,    40e6),  "base_bcr": 2.4},
-        "Vegetation Management":  {"n": 14, "cost_range": (0.5e6,  8e6),   "base_bcr": 5.1},
-        "Climate Resilience":     {"n":  8, "cost_range": (2e6,    20e6),  "base_bcr": 2.2},
-    }
-
-    regions = [
-        "LA Foothills", "San Bernardino Mtns", "Inland Empire",
-        "San Gabriel Valley", "Orange County North",
-        "Coachella Valley", "Pomona–Ontario",
-    ]
-
-    rows = []
-    proj_id = 1
-    for cat, cfg in categories.items():
-        for _ in range(cfg["n"]):
-            cost = rng.uniform(*cfg["cost_range"])
-            bcr_noise = rng.normal(0, 0.6)
-            bcr = max(0.5, cfg["base_bcr"] + bcr_noise)
-
-            # Risk reduction: total benefit = BCR × cost
-            total_benefit = bcr * cost
-            # Split benefit: direct risk reduction vs co-benefits
-            direct_frac = rng.uniform(0.55, 0.82)
-            risk_reduction = total_benefit * direct_frac
-            cobenefit      = total_benefit * (1 - direct_frac)
-
-            # Failure probability reduction
-            pf_reduction = np.clip(rng.normal(0.18, 0.07), 0.04, 0.40)
-
-            # Timeline
-            duration_months = int(rng.choice([6, 12, 18, 24, 36],
-                                  p=[0.15, 0.30, 0.25, 0.20, 0.10]))
-
-            # Regulatory requirement
-            reg_required = rng.random() < (
-                0.7 if cat in ["Wildfire Mitigation", "Vegetation Management"] else 0.25
-            )
-
-            # Assets protected
-            assets_protected = int(rng.integers(5, 280))
-
-            # Customers protected (weighted by region)
-            customers = int(rng.integers(500, 85_000))
-
-            # NPV at 7% discount rate
-            annual_benefit = risk_reduction / (duration_months / 12)
-            years = duration_months / 12
-            npv = sum(annual_benefit / (1.07 ** t) for t in range(1, int(years) + 2)) - cost
-
-            # Emissions reduction (CO2e tonnes)
-            co2_reduction = int(rng.integers(10, 2500))
-
-            rows.append({
-                "project_id":          f"INV-{proj_id:03d}",
-                "project_name":        _project_name(cat, proj_id, rng),
-                "category":            cat,
-                "region":              rng.choice(regions),
-                "cost_usd":            round(cost, 0),
-                "risk_reduction_usd":  round(risk_reduction, 0),
-                "cobenefit_usd":       round(cobenefit, 0),
-                "total_benefit_usd":   round(total_benefit, 0),
-                "bcr":                 round(bcr, 2),
-                "npv_usd":             round(npv, 0),
-                "pf_reduction":        round(pf_reduction, 3),
-                "duration_months":     duration_months,
-                "assets_protected":    assets_protected,
-                "customers_protected": customers,
-                "regulatory_required": reg_required,
-                "co2_reduction_tonnes":co2_reduction,
-                "cost_per_customer":   round(cost / customers, 2),
-                "risk_per_dollar":     round(risk_reduction / cost, 3),
-            })
-            proj_id += 1
-
-    return pd.DataFrame(rows)
-
-
-def _project_name(cat, pid, rng):
-    names = {
-        "Wildfire Mitigation":    ["Covered Conductor Replacement", "PSPS Automation Upgrade",
-                                   "Fire Hardening Program", "Ignition Prevention Initiative",
-                                   "High Fire Risk Zone Retrofit"],
-        "Grid Hardening":         ["Transmission Reinforcement", "Distribution Upgrade",
-                                   "Storm Hardening Program", "Infrastructure Modernization",
-                                   "Grid Resilience Initiative"],
-        "Predictive Maintenance": ["Sensor Deployment Program", "AI-Driven Inspection Rollout",
-                                   "Condition Monitoring Upgrade", "Smart Asset Diagnostics",
-                                   "Remote Monitoring Initiative"],
-        "Undergrounding":         ["Underground Conversion", "Overhead-to-Underground Migration",
-                                   "Urban Circuit Undergrounding", "Residential Underground Program"],
-        "Substation Upgrades":    ["Substation Automation", "Transformer Replacement Program",
-                                   "Protection System Upgrade", "Control System Modernization"],
-        "Vegetation Management":  ["Enhanced Patrol Program", "Rapid Response Vegetation",
-                                   "LiDAR Vegetation Mapping", "Fuel Load Reduction",
-                                   "Clearance Enhancement Program"],
-        "Climate Resilience":     ["Extreme Heat Adaptation", "Drought Resilience Program",
-                                   "Climate-Ready Infrastructure", "Long-Term Resilience Plan"],
-    }
-    return f"{rng.choice(names[cat])} {pid}"
+def _load_projects(seed=42):
+    return generate_projects(seed)
 
 
 @st.cache_data
-def run_monte_carlo(projects_df, selected_ids, n_sims=2000, seed=99):
-    rng = np.random.default_rng(seed)
-    sel = projects_df[projects_df["project_id"].isin(selected_ids)]
-    if sel.empty:
-        return None
-    results = []
-    for _ in range(n_sims):
-        noise      = rng.normal(1.0, 0.15, len(sel))
-        sim_bcr    = (sel["bcr"].values * noise).mean()
-        noise2     = rng.normal(1.0, 0.18, len(sel))
-        sim_risk   = (sel["risk_reduction_usd"].values * noise2).sum()
-        results.append({"sim_bcr": sim_bcr, "sim_risk_reduction": sim_risk})
-    return pd.DataFrame(results)
-
-
-def _apply_chart_theme(fig, height=None):
-    layout = dict(
-        font=dict(family="Source Sans 3, sans-serif", color=BODY, size=12),
-        paper_bgcolor="#FFFFFF",
-        plot_bgcolor="#FAFBFC",
-        margin=dict(l=12, r=12, t=36, b=40),
-    )
-    if height:
-        layout["height"] = height
-    fig.update_layout(**layout)
-    fig.update_xaxes(gridcolor=RULE, zerolinecolor=RULE)
-    fig.update_yaxes(gridcolor=RULE, zerolinecolor=RULE)
-    return fig
-
-
-def greedy_optimize(df_cand, budget, obj_col, budget_col="cost_usd"):
-    df_sorted = df_cand.sort_values(obj_col, ascending=False).copy()
-    selected, spent = [], 0
-    for _, row in df_sorted.iterrows():
-        if spent + row[budget_col] <= budget:
-            selected.append(row["project_id"])
-            spent += row[budget_col]
-    return selected
-
-
-OBJ_MAP = {
-    "Maximize Risk Reduction":      "risk_per_dollar",
-    "Maximize BCR":                 "bcr",
-    "Maximize Customers Protected": "customers_protected",
-}
-
-
-def build_scenarios(dff, scenario_budget, prioritize_by, include_reg):
-    obj_col = OBJ_MAP[prioritize_by]
-
-    scen_nothing = {
-        "name": "Do Nothing", "ids": [], "cost": 0,
-        "risk_red": 0, "customers": 0, "bcr": 0,
-    }
-
-    if include_reg:
-        reg_projects = dff[dff["regulatory_required"]].copy()
-        reg_cost = reg_projects["cost_usd"].sum()
-        remaining = scenario_budget - reg_cost
-        opt_cand = dff[~dff["regulatory_required"]].copy()
-        opt_ids = reg_projects["project_id"].tolist()
-        if remaining > 0:
-            opt_ids += greedy_optimize(opt_cand, remaining, obj_col)
-    else:
-        opt_ids = greedy_optimize(dff, scenario_budget, obj_col)
-
-    opt_sel = dff[dff["project_id"].isin(opt_ids)]
-    scen_opt = {
-        "name": "Optimized Portfolio",
-        "ids": opt_ids,
-        "cost": opt_sel["cost_usd"].sum(),
-        "risk_red": opt_sel["risk_reduction_usd"].sum(),
-        "customers": opt_sel["customers_protected"].sum(),
-        "bcr": (
-            opt_sel["total_benefit_usd"].sum() / opt_sel["cost_usd"].sum()
-            if opt_sel["cost_usd"].sum() > 0 else 0
-        ),
-    }
-
-    reg_sel = dff[dff["regulatory_required"]]
-    scen_reg = {
-        "name": "Regulatory Minimum",
-        "ids": reg_sel["project_id"].tolist(),
-        "cost": reg_sel["cost_usd"].sum(),
-        "risk_red": reg_sel["risk_reduction_usd"].sum(),
-        "customers": reg_sel["customers_protected"].sum(),
-        "bcr": (
-            reg_sel["total_benefit_usd"].sum() / reg_sel["cost_usd"].sum()
-            if reg_sel["cost_usd"].sum() > 0 else 0
-        ),
-    }
-
-    return [scen_nothing, scen_reg, scen_opt], opt_sel, opt_ids, scen_opt, scen_reg
-
-
-def _scenario_summary_rows(scenarios, dff):
-    rows = []
-    baseline_risk = dff["risk_reduction_usd"].sum()
-    for s in scenarios:
-        roi = (s["risk_red"] / s["cost"] * 100) if s["cost"] > 0 else 0
-        pct = (s["risk_red"] / baseline_risk * 100) if baseline_risk > 0 else 0
-        rows.append({
-            "Scenario": s["name"],
-            "Projects Funded": len(s["ids"]),
-            "Total Investment": f"${s['cost']/1e6:.1f}M",
-            "Risk Reduction": f"${s['risk_red']/1e6:.1f}M",
-            "% of Max Risk Red.": f"{pct:.1f}%",
-            "Portfolio BCR": f"{s['bcr']:.2f}x",
-            "ROI (Risk/Cost)": f"{roi:.0f}%",
-            "Customers Protected": f"{s['customers']:,}",
-        })
-    return rows
+def _run_monte_carlo(projects_df, selected_ids, n_sims=2000, seed=99):
+    return run_monte_carlo(projects_df, selected_ids, n_sims, seed)
 
 
 def _build_report_html(dff, scenarios, scen_opt, scen_reg, opt_ids, meta):
-    summary = _scenario_summary_rows(scenarios, dff)
+    summary = scenario_summary_rows(scenarios, dff)
     top_projects = (
         dff[dff["project_id"].isin(opt_ids)]
         .sort_values("bcr", ascending=False)
@@ -493,19 +284,7 @@ def _build_report_pdf(dff, scenarios, scen_opt, scen_reg, opt_ids, meta):
 
 
 # ── LOAD DATA ─────────────────────────────────────────────────────────────────
-df = generate_projects()
-
-CATEGORIES = sorted(df["category"].unique())
-REGIONS    = sorted(df["region"].unique())
-CAT_COLORS = {
-    "Wildfire Mitigation":    RED,
-    "Grid Hardening":         NAVY,
-    "Predictive Maintenance": GREEN,
-    "Undergrounding":         "#6a1b9a",
-    "Substation Upgrades":    TEAL,
-    "Vegetation Management":  "#558b2f",
-    "Climate Resilience":     "#00838f",
-}
+df = _load_projects()
 
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
@@ -550,8 +329,7 @@ with st.sidebar:
     st.markdown("---")
     st.caption(
         "Built by [Sherriff Abdul-Hamid](https://poverty360.org)  \n"
-        "Data: Simulated SoCal utility projects  \n"
-        "Method: Expected Value Optimization"
+        "github.com/S-ABDUL-AI"
     )
 
 
@@ -724,7 +502,6 @@ with tab1:
                 "category":           "Category",
             },
         )
-        # Add quadrant lines
         med_risk = dff["risk_reduction_usd"].median()
         med_bcr  = dff["bcr"].median()
         fig_scatter.add_hline(y=med_bcr, line_dash="dot",
@@ -801,7 +578,6 @@ with tab1:
         )
         st.plotly_chart(fig_cpc, use_container_width=True)
 
-    # ── TOP PROJECTS TABLE ────────────────────────────────────
     st.markdown('<div class="section-header">Top 20 Projects by Benefit-Cost Ratio</div>',
                 unsafe_allow_html=True)
     top20 = (dff.nlargest(20, "bcr")
@@ -856,7 +632,6 @@ with tab2:
             unsafe_allow_html=True,
         )
 
-    # ── COMPARISON CHARTS ─────────────────────────────────────
     with col_p:
         scen_names  = [s["name"] for s in scenarios]
         scen_colors = [MUTED, AMBER, NAVY]
@@ -887,11 +662,10 @@ with tab2:
 
     st.markdown("---")
 
-    # ── SCENARIO DETAIL COMPARISON ────────────────────────────
     st.markdown('<div class="section-header">Scenario Comparison Summary</div>',
                 unsafe_allow_html=True)
 
-    comp_rows = _scenario_summary_rows(scenarios, dff)
+    comp_rows = scenario_summary_rows(scenarios, dff)
     st.dataframe(pd.DataFrame(comp_rows), use_container_width=True, hide_index=True)
 
     reg_pct = (
@@ -914,7 +688,6 @@ with tab2:
         unsafe_allow_html=True
     )
 
-    # ── SELECTED PROJECTS LIST ────────────────────────────────
     st.markdown('<div class="section-header">Optimized Portfolio — Selected Projects</div>',
                 unsafe_allow_html=True)
     if opt_ids:
@@ -1010,7 +783,6 @@ with tab3:
         )
         st.plotly_chart(fig_npv, use_container_width=True)
 
-    # ── EFFICIENT FRONTIER ────────────────────────────────────
     st.markdown('<div class="section-header">Efficient Frontier — Risk Reduction vs. Investment Cost</div>',
                 unsafe_allow_html=True)
     st.caption("Each point represents the optimized portfolio at a given budget level.")
@@ -1037,7 +809,6 @@ with tab3:
         fill="tozeroy", fillcolor="rgba(31,56,100,0.07)",
         name="Efficient Frontier",
     ))
-    # Mark current budget
     cur_cost = opt_sel["cost_usd"].sum() / 1e6
     cur_rr   = opt_sel["risk_reduction_usd"].sum() / 1e6
     fig_front.add_trace(go.Scatter(
@@ -1056,7 +827,6 @@ with tab3:
     )
     st.plotly_chart(fig_front, use_container_width=True)
 
-    # ── BCR TABLE ─────────────────────────────────────────────
     st.markdown('<div class="section-header">Full Benefit-Cost Register</div>',
                 unsafe_allow_html=True)
     bca_df = dff.sort_values("bcr", ascending=False)[
@@ -1108,7 +878,7 @@ with tab4:
         n_sims = st.selectbox("Simulations", [500, 1000, 2000, 5000], index=1)
 
     if mc_projects:
-        mc_results = run_monte_carlo(dff, mc_projects, n_sims=n_sims)
+        mc_results = _run_monte_carlo(dff, mc_projects, n_sims=n_sims)
         mc_sel     = dff[dff["project_id"].isin(mc_projects)]
 
         base_bcr  = mc_sel["bcr"].mean()
@@ -1199,7 +969,6 @@ with tab4:
             )
             st.plotly_chart(fig_mc_rr, use_container_width=True)
 
-        # ── SENSITIVITY TABLE ─────────────────────────────────
         st.markdown('<div class="section-header">Sensitivity Analysis — Discount Rate Impact on NPV</div>',
                     unsafe_allow_html=True)
         rates       = [0.03, 0.05, 0.07, 0.09, 0.11]
