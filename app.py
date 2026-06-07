@@ -198,8 +198,7 @@ Objective: {html.escape(meta['objective'])} · {meta['project_count']} projects 
 ${scen_opt['risk_red']/1e6:.1f}M in risk reduction at ${scen_opt['cost']/1e6:.1f}M invested
 (BCR {scen_opt['bcr']:.2f}x), versus ${scen_reg['risk_red']/1e6:.1f}M under the regulatory minimum.
 Methodology aligns with CPUC Risk-Based Decision-Making (RBDM) expected-value framework.</div>
-<p class="footer">Built by Sherriff Abdul-Hamid · poverty360.org · Simulated SoCal utility portfolio.
-Decision support only — not a regulatory filing.</p>
+<p class="footer">Simulated SoCal utility portfolio · Decision support only — not a regulatory filing.</p>
 </body></html>"""
 
 
@@ -276,8 +275,7 @@ def _build_report_pdf(dff, scenarios, scen_opt, scen_reg, opt_ids, meta):
     c.setFont("Helvetica", 8.5)
     c.drawString(
         margin, margin - 2,
-        "Decision support brief · Sherriff Abdul-Hamid · poverty360.org · "
-        "Simulated portfolio aligned to CPUC RBDM framework.",
+        "Decision support brief · Simulated portfolio aligned to CPUC RBDM framework.",
     )
     c.save()
     return buf.getvalue()
@@ -325,12 +323,6 @@ with st.sidebar:
         list(OBJ_MAP.keys()),
     )
     include_reg = st.checkbox("Always include regulatory-required projects", value=True)
-
-    st.markdown("---")
-    st.caption(
-        "Built by [Sherriff Abdul-Hamid](https://poverty360.org)  \n"
-        "github.com/S-ABDUL-AI"
-    )
 
 
 # ── FILTERS ───────────────────────────────────────────────────────────────────
@@ -1012,13 +1004,14 @@ with tab4:
         st.info("Select at least one project above to run the simulation.")
 
 # ── FOOTER ────────────────────────────────────────────────────────────────────
+st.markdown("---")
 st.markdown(
-    f'<div class="byline">'
-    f'<strong style="color:{GOLD};">Grid Investment Prioritization Engine</strong> · '
-    f'Benefit-cost optimization for utility infrastructure capital decisions.<br>'
-    f'Built by <a href="https://poverty360.org">Sherriff Abdul-Hamid</a> · '
-    f'Download the executive brief from the report card above the tabs.<br>'
-    f'Methodology: CPUC Risk-Based Decision-Making (RBDM) · Simulated SoCal utility portfolio.'
-    f'</div>',
+    "<div style='text-align:center; color:#666; font-size:0.85rem; padding:10px 0;'>"
+    "<strong>Sherriff Abdul-Hamid</strong><br>"
+    "Data Scientist · Energy Economist · Public Infrastructure Analytics<br>"
+    "<a href='https://poverty360.org' target='_blank'>poverty360.org</a> · "
+    "<a href='https://www.linkedin.com/in/abdul-hamid-sherriff-08583354/' target='_blank'>LinkedIn</a> · "
+    "<a href='https://github.com/S-ABDUL-AI' target='_blank'>GitHub</a>"
+    "</div>",
     unsafe_allow_html=True,
 )
